@@ -1,0 +1,24 @@
+# Each matrix leg gets a gate run of its own from a text gate_cli_id.
+name: matrix gate
+on: workflow_dispatch
+jobs:
+  sast:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        uses: accuknox/sast-scan-opengrep-action@feat/quality-gate
+        with:
+          accuknox_endpoint: ${{ secrets.ACCUKNOX_ENDPOINT }}
+          accuknox_token: ${{ secrets.ACCUKNOX_TOKEN }}
+          accuknox_label: ${{ secrets.ACCUKNOX_LABEL }}
+          quality_gate: "true"
+          gate_cli_id: ${{ matrix.os }}
+          gate_token: ${{ secrets.ACCUKNOX_GATE_TOKEN }}
+          soft_fail: "true"
+      - if: always()
+        run: echo "OUT ${{ matrix.os }} cli_id=${{ steps.gate.outputs.cli_id }} gate_status=${{ steps.gate.outputs.gate_status }}"

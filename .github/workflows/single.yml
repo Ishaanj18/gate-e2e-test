@@ -1,0 +1,27 @@
+# One step: scan, upload and wait for the verdict.
+name: single-step gate
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        uses: accuknox/sast-scan-opengrep-action@feat/quality-gate
+        with:
+          accuknox_endpoint: ${{ secrets.ACCUKNOX_ENDPOINT }}
+          accuknox_token: ${{ secrets.ACCUKNOX_TOKEN }}
+          accuknox_label: ${{ secrets.ACCUKNOX_LABEL }}
+          quality_gate: "true"
+          gate_token: ${{ secrets.ACCUKNOX_GATE_TOKEN }}
+          soft_fail: "false"
+      - name: outputs
+        if: always()
+        run: |
+          echo "OUT cli_id=${{ steps.gate.outputs.cli_id }}"
+          echo "OUT gate_status=${{ steps.gate.outputs.gate_status }}"
+          echo "OUT gate_json_file=${{ steps.gate.outputs.gate_json_file }}"
+          echo "OUT event=$GITHUB_EVENT_NAME ref_name=$GITHUB_REF_NAME head_ref=${GITHUB_HEAD_REF:-} attempt=$GITHUB_RUN_ATTEMPT"

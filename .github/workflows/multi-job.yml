@@ -1,0 +1,76 @@
+# Scans in separate jobs, one gate job. pin_id=true shares a UUID from a first job (survives
+# "Re-run failed jobs"); pin_id=false relies on the id derived from the workflow run.
+name: multi-job gate
+on:
+  workflow_dispatch:
+    inputs:
+      pin_id:
+        type: boolean
+        default: true
+env:
+  SCANNER_VERSION: v0.16.5
+jobs:
+  gate-id:
+    runs-on: ubuntu-latest
+    outputs:
+      cli_id: ${{ steps.id.outputs.cli_id }}
+    steps:
+      - id: id
+        run: |
+          if [ "${{ inputs.pin_id }}" = "true" ]; then
+            echo "cli_id=$(cat /proc/sys/kernel/random/uuid)" >> "$GITHUB_OUTPUT"
+          else
+            echo "cli_id=" >> "$GITHUB_OUTPUT"
+          fi
+
+  sast:
+    needs: gate-id
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        uses: accuknox/sast-scan-opengrep-action@feat/quality-gate
+        with:
+          accuknox_endpoint: ${{ secrets.ACCUKNOX_ENDPOINT }}
+          accuknox_token: ${{ secrets.ACCUKNOX_TOKEN }}
+          accuknox_label: ${{ secrets.ACCUKNOX_LABEL }}
+          quality_gate: "true"
+          gate_scanners: "SG,IAC"
+          gate_wait: "false"
+          gate_cli_id: ${{ needs.gate-id.outputs.cli_id }}
+      - run: echo "OUT sast cli_id=${{ steps.scan.outputs.cli_id }} attempt=$GITHUB_RUN_ATTEMPT"
+
+  iac:
+    needs: gate-id
+    runs-on: ubuntu-latest
+    env:
+      ACCUKNOX_ENDPOINT: ${{ secrets.ACCUKNOX_ENDPOINT }}
+      ACCUKNOX_TOKEN: ${{ secrets.ACCUKNOX_TOKEN }}
+      ACCUKNOX_LABEL: ${{ secrets.ACCUKNOX_LABEL }}
+      ACCUKNOX_CLI_ID: ${{ needs.gate-id.outputs.cli_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: IaC scan with the raw CLI
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/accuknox" \
+            "https://github.com/accuknox/aspm-scanner-cli/releases/download/${SCANNER_VERSION}/accuknox-aspm-scanner-linux-amd64"
+          chmod +x "$RUNNER_TEMP/accuknox"
+          "$RUNNER_TEMP/accuknox" tool install --type iac
+          "$RUNNER_TEMP/accuknox" scan --quality-gate --gate-scanners SG,IAC iac --command "-d infra" \
+            --repo-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+  quality-gate:
+    needs: [gate-id, sast, iac]
+    runs-on: ubuntu-latest
+    steps:
+      - id: gate
+        uses: accuknox/sast-scan-opengrep-action@feat/quality-gate
+        with:
+          accuknox_endpoint: ${{ secrets.ACCUKNOX_ENDPOINT }}
+          accuknox_token: ${{ secrets.ACCUKNOX_TOKEN }}
+          gate_only: "true"
+          gate_cli_id: ${{ needs.gate-id.outputs.cli_id }}
+          gate_token: ${{ secrets.ACCUKNOX_GATE_TOKEN }}
+          soft_fail: "false"
+      - if: always()
+        run: echo "OUT gate cli_id=${{ steps.gate.outputs.cli_id }} gate_status=${{ steps.gate.outputs.gate_status }} attempt=$GITHUB_RUN_ATTEMPT"
